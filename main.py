@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -84,9 +85,25 @@ async def procesar_audio_gemini(audio_chunk: bytes) -> TranscripcionRespuesta:
 app = FastAPI(title="Vibeathon API", version="1.0.0")
 
 
+@app.get("/")
+async def root():
+    """Sirve el frontend (index.html) en la ruta raíz."""
+    return FileResponse("index.html")
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Punto de entrada: usa PORT de Railway (o 8000 en local)
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 # ---------------------------------------------------------------------------

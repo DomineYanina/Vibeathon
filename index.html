@@ -189,8 +189,10 @@
 
         async function startRecording() {
             try {
-                // 1. Inicializar WebSocket
-                ws = new WebSocket('ws://localhost:8000/ws/transcribe');
+                // URL dinámica: usa wss:// en Railway (HTTPS), ws:// en local
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/transcribe`;
+                ws = new WebSocket(wsUrl);
 
                 ws.onopen = async () => {
                     updateStatus(true, 'Conectado y Grabando');
@@ -227,8 +229,8 @@
                             }
                             const base64Audio = btoa(binary);
                             
-                            // Enviar payload al backend
-                            ws.send(JSON.stringify({ audio_data: base64Audio }));
+                            // Enviar base64 directo como texto al backend
+                            ws.send(base64Audio);
                         }
                     };
                 };
