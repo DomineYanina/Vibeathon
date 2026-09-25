@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nerdearla Vibeathon - Live Subs</title>
+    <style>
+        :root {
+            --bg-color: #0f172a; /* Fondo oscuro */
+            --text-original: #fde047; /* Amarillo contraste */
+            --text-translated: #67e8f9; /* Cian contraste */
+            --ui-text: #cbd5e1;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--ui-text);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-bottom: 1px solid #334155;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #2563eb;
+        }
+
+        button.stop {
+            background-color: #ef4444;
+        }
+        
+        button.stop:hover {
+            background-color: #dc2626;
+        }
+
+        #status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: bold;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            background-color: #64748b;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot.active {
+            background-color: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            gap: 2rem;
+        }
+
+        .subtitle-box {
+            flex: 1;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border: 1px solid #334155;
+        }
+
+        .label {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+            color: #94a3b8;
+        }
+
+        .text-content {
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1.3;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            transition: all 0.2s ease-in-out;
+        }
+
+        #original-text {
+            color: var(--text-original);
+        }
+
+        #translated-text {
+            color: var(--text-translated);
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Nerdearla Live Subs</h1>
+        <div class="controls">
+            <div id="status-indicator">
+                <span class="dot" id="dot"></span>
+                <span id="status-text">Desconectado</span>
+            </div>
+            <button id="toggle-btn" onclick="toggleRecording()">Iniciar Transcripción</button>
+        </div>
+    </header>
+
+    <main>
+        <div class="subtitle-box">
+            <div class="label">Idioma Original</div>
+            <div class="text-content" id="original-text">Esperando audio...</div>
+        </div>
+        
+        <div class="subtitle-box">
+            <div class="label">Traducción (Español/Inglés)</div>
+            <div class="text-content" id="translated-text">Waiting for audio...</div>
+        </div>
+    </main>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let processor = null;
+        let isRecording = false;
+
+        const toggleBtn = document.getElementById('toggle-btn');
+        const statusText = document.getElementById('status-text');
+        const dot = document.getElementById('dot');
+        const originalText = document.getElementById('original-text');
+        const translatedText = document.getElementById('translated-text');
+
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                // 1. Inicializar WebSocket
+                ws = new WebSocket('ws://localhost:8000/ws/transcribe');
+
+                ws.onopen = async () => {
+                    updateStatus(true, 'Conectado y Grabando');
+                    
+                    // 2. Pedir permisos y capturar audio (Forzamos 16kHz para Gemini/Whisper)
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: { channelCount: 1, sampleRate: 16000 } 
+                    });
+                    
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                    const source = audioContext.createMediaStreamSource(mediaStream);
+                    
+                    // Usamos ScriptProcessor para extraer el PCM crudo rápidamente en el MVP
+                    processor = audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    source.connect(processor);
+                    processor.connect(audioContext.destination); // Necesario para que el evento se dispare en Chrome
+                    
+                    processor.onaudioprocess = (e) => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            
+                            // Convertir Float32 a Int16 (Formato esperado por la mayoría de APIs de audio)
+                            const pcm16 = new Int16Array(inputData.length);
+                            for (let i = 0; i < inputData.length; i++) {
+                                pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                            }
+                            
+                            // Convertir a Base64 para enviarlo por el WebSocket
+                            const uint8 = new Uint8Array(pcm16.buffer);
+                            let binary = '';
+                            for (let i = 0; i < uint8.byteLength; i++) {
+                                binary += String.fromCharCode(uint8[i]);
+                            }
+                            const base64Audio = btoa(binary);
+                            
+                            // Enviar payload al backend
+                            ws.send(JSON.stringify({ audio_data: base64Audio }));
+                        }
+                    };
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    // Actualizar la interfaz si llegan datos nuevos
+                    if (data.original) {
+                        originalText.innerText = data.original;
+                    }
+                    if (data.traduccion) {
+                        translatedText.innerText = data.traduccion;
+                    }
+                };
+
+                ws.onclose = () => {
+                    stopRecording();
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket Error:', error);
+                    updateStatus(false, 'Error de conexión');
+                    stopRecording();
+                };
+
+            } catch (error) {
+                console.error('Error accediendo al micrófono:', error);
+                updateStatus(false, 'Error de Micrófono');
+            }
+        }
+
+        function stopRecording() {
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+            
+            updateStatus(false, 'Desconectado');
+        }
+
+        function updateStatus(active, text) {
+            isRecording = active;
+            statusText.innerText = text;
+            if (active) {
+                dot.classList.add('active');
+                toggleBtn.innerText = 'Detener Transcripción';
+                toggleBtn.classList.add('stop');
+            } else {
+                dot.classList.remove('active');
+                toggleBtn.innerText = 'Iniciar Transcripción';
+                toggleBtn.classList.remove('stop');
+            }
+        }
+    </script>
+</body>
+</html>
